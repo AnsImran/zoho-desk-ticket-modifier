@@ -80,52 +80,64 @@ jobs:
       group: production-deploy
       cancel-in-progress: true
     steps:
-      - name: Validate secrets
+      - name: Validate required secrets
+        shell: bash
         run: |
-          for secret in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_GIT_PATH GHCR_USER GHCR_TOKEN; do
-            eval val=\$$secret
-            if [ -z "$val" ]; then echo "::error::Missing secret $secret"; exit 1; fi
-          done
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_GIT_PATH: ${{ secrets.DEPLOY_GIT_PATH }}
-          GHCR_USER: ${{ secrets.GHCR_USER }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          set -euo pipefail
+          test -n "${{ secrets.DEPLOY_HOST }}" || (echo "Missing secret: DEPLOY_HOST" && exit 1)
+          test -n "${{ secrets.DEPLOY_USER }}" || (echo "Missing secret: DEPLOY_USER" && exit 1)
+          test -n "${{ secrets.DEPLOY_GIT_PATH }}" || (echo "Missing secret: DEPLOY_GIT_PATH" && exit 1)
+          test -n "${{ secrets.DEPLOY_SSH_KEY }}" || (echo "Missing secret: DEPLOY_SSH_KEY" && exit 1)
+          test -n "${{ secrets.GHCR_USER }}" || (echo "Missing secret: GHCR_USER" && exit 1)
+          test -n "${{ secrets.GHCR_TOKEN }}" || (echo "Missing secret: GHCR_TOKEN" && exit 1)
 
       - name: Configure SSH
+        shell: bash
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          PORT=${{ secrets.DEPLOY_PORT || 22 }}
-          ssh-keyscan -p "$PORT" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Deploy
-        run: |
-          PORT="${{ secrets.DEPLOY_PORT || 22 }}"
-          B64_PATH=$(echo -n "${{ secrets.DEPLOY_GIT_PATH }}" | base64 -w0)
-          B64_USER=$(echo -n "${{ secrets.GHCR_USER }}" | base64 -w0)
-          B64_TOKEN=$(echo -n "${{ secrets.GHCR_TOKEN }}" | base64 -w0)
-
-          ssh -p "$PORT" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -s <<REMOTE
           set -euo pipefail
-          DEPLOY_PATH=\$(echo "$B64_PATH" | base64 -d)
-          GHCR_U=\$(echo "$B64_USER" | base64 -d)
-          GHCR_T=\$(echo "$B64_TOKEN" | base64 -d)
+          mkdir -p ~/.ssh
+          cat > ~/.ssh/id_ed25519 <<'EOF'
+          ${{ secrets.DEPLOY_SSH_KEY }}
+          EOF
+          chmod 600 ~/.ssh/id_ed25519
 
-          cd "\$DEPLOY_PATH"
+          PORT="${{ secrets.DEPLOY_PORT }}"
+          if [ -z "$PORT" ]; then PORT="22"; fi
+          ssh-keyscan -p "$PORT" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Pull and deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT="${{ secrets.DEPLOY_PORT }}"
+          if [ -z "$PORT" ]; then PORT="22"; fi
+
+          DEPLOY_GIT_PATH_B64="$(printf '%s' "${{ secrets.DEPLOY_GIT_PATH }}" | base64 -w0)"
+          GHCR_USER_B64="$(printf '%s' "${{ secrets.GHCR_USER }}" | base64 -w0)"
+          GHCR_TOKEN_B64="$(printf '%s' "${{ secrets.GHCR_TOKEN }}" | base64 -w0)"
+
+          ssh -p "$PORT" -i ~/.ssh/id_ed25519 "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "DEPLOY_GIT_PATH_B64='$DEPLOY_GIT_PATH_B64' GHCR_USER_B64='$GHCR_USER_B64' GHCR_TOKEN_B64='$GHCR_TOKEN_B64' bash -s" <<'EOS'
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+
+          deploy_git_path="$(printf '%s' "$DEPLOY_GIT_PATH_B64" | base64 -d)"
+          ghcr_user="$(printf '%s' "$GHCR_USER_B64" | base64 -d)"
+          ghcr_token="$(printf '%s' "$GHCR_TOKEN_B64" | base64 -d)"
+
+          cd "$deploy_git_path"
+
           git fetch --prune origin main
           git checkout main
           git reset --hard origin/main
 
-          echo "\$GHCR_T" | docker login ghcr.io -u "\$GHCR_U" --password-stdin
+          echo "$ghcr_token" | docker login ghcr.io -u "$ghcr_user" --password-stdin
 
           docker compose pull
           docker compose up -d --remove-orphans
           docker image prune -f
 
+          echo "Waiting for services to start..."
           sleep 5
           docker compose ps
-          REMOTE
+          EOS
