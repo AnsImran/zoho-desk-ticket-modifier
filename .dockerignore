@@ -1,0 +1,8 @@
+.git
+.venv
+credentials
+*.pem
+.env
+.github
+__pycache__
+*.py[oc]

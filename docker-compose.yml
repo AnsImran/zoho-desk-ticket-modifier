@@ -1,0 +1,26 @@
+services:
+  ticket-modifier:
+    image: ghcr.io/ansimran/zoho-desk-ticket-modifier/ticket-modifier:latest
+    container_name: zoho-desk-ticket-modifier
+    env_file: .env
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - ./.env:/app/.env
+      - ./comment_templates.yaml:/app/comment_templates.yaml
+    environment:
+      TOKEN_SERVICE_URL: http://token-service:8000/v1/token
+      LOG_FORMAT: json
+    networks:
+      - zoho-token-service_default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/v1/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  zoho-token-service_default:
+    external: true

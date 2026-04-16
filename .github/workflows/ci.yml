@@ -1,0 +1,131 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "credentials/**"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# ───────────────────────────────────────────────────
+# Job 1 — Test
+# ───────────────────────────────────────────────────
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - name: Compile check
+        run: uv run python -m compileall -q main.py src
+
+  # ───────────────────────────────────────────────────
+  # Job 2 — Build & push image to GHCR
+  # ───────────────────────────────────────────────────
+  build-and-push:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ghcr.io/ansimran/zoho-desk-ticket-modifier/ticket-modifier:latest
+          cache-from: type=registry,ref=ghcr.io/ansimran/zoho-desk-ticket-modifier/ticket-modifier:buildcache
+          cache-to: type=registry,ref=ghcr.io/ansimran/zoho-desk-ticket-modifier/ticket-modifier:buildcache,mode=max
+          provenance: false
+          sbom: false
+        env:
+          SOURCE_DATE_EPOCH: 0
+
+  # ───────────────────────────────────────────────────
+  # Job 3 — Deploy to EC2
+  # ───────────────────────────────────────────────────
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: true
+    steps:
+      - name: Validate secrets
+        run: |
+          for secret in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_GIT_PATH GHCR_USER GHCR_TOKEN; do
+            eval val=\$$secret
+            if [ -z "$val" ]; then echo "::error::Missing secret $secret"; exit 1; fi
+          done
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_GIT_PATH: ${{ secrets.DEPLOY_GIT_PATH }}
+          GHCR_USER: ${{ secrets.GHCR_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          PORT=${{ secrets.DEPLOY_PORT || 22 }}
+          ssh-keyscan -p "$PORT" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy
+        run: |
+          PORT="${{ secrets.DEPLOY_PORT || 22 }}"
+          B64_PATH=$(echo -n "${{ secrets.DEPLOY_GIT_PATH }}" | base64 -w0)
+          B64_USER=$(echo -n "${{ secrets.GHCR_USER }}" | base64 -w0)
+          B64_TOKEN=$(echo -n "${{ secrets.GHCR_TOKEN }}" | base64 -w0)
+
+          ssh -p "$PORT" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -s <<REMOTE
+          set -euo pipefail
+          DEPLOY_PATH=\$(echo "$B64_PATH" | base64 -d)
+          GHCR_U=\$(echo "$B64_USER" | base64 -d)
+          GHCR_T=\$(echo "$B64_TOKEN" | base64 -d)
+
+          cd "\$DEPLOY_PATH"
+          git fetch --prune origin main
+          git checkout main
+          git reset --hard origin/main
+
+          echo "\$GHCR_T" | docker login ghcr.io -u "\$GHCR_U" --password-stdin
+
+          docker compose pull
+          docker compose up -d --remove-orphans
+          docker image prune -f
+
+          sleep 5
+          docker compose ps
+          REMOTE

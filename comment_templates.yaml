@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# Private Comment Templates for Zoho Desk Tickets
+# ---------------------------------------------------------------------------
+# Each template defines:
+#   label       - Human-readable name shown in API docs
+#   fields      - List of required placeholder names (sent in the API request)
+#   template    - Text body with {placeholders} matching the fields above
+#
+# To add a new comment type:
+#   1. Add a new key under "comment_types"
+#   2. Define label, fields, and template
+#   3. Restart the service -- the new type is immediately available
+#
+# The {timestamp_utc} placeholder is injected automatically by the service
+# (UTC ISO-8601 format, e.g. 2026-04-16 14:30:00 UTC). Do NOT list it in
+# fields -- it is always available.
+# ---------------------------------------------------------------------------
+
+comment_types:
+
+  text_message:
+    label: "Text Message Sent"
+    fields:
+      - recipient_name
+      - phone_number
+      - message
+    template: |
+      --- TEXT MESSAGE NOTIFICATION ---
+      Timestamp : {timestamp_utc}
+      Recipient : {recipient_name}
+      Phone     : {phone_number}
+      Message   : {message}
+      ---------------------------------
+
+  robot_call:
+    label: "Robot Call Made"
+    fields:
+      - recipient_name
+      - phone_number
+      - message
+    template: |
+      --- ROBOT CALL NOTIFICATION ---
+      Timestamp : {timestamp_utc}
+      Recipient : {recipient_name}
+      Phone     : {phone_number}
+      Message   : {message}
+      --------------------------------
+
+  instant_message:
+    label: "Instant Message Sent"
+    fields:
+      - group_name
+      - message
+    template: |
+      --- INSTANT MESSAGE NOTIFICATION ---
+      Timestamp : {timestamp_utc}
+      Group     : {group_name}
+      Message   : {message}
+      -------------------------------------
+
+  desktop_notification:
+    label: "Desktop Notification Sent"
+    fields:
+      - desktop_name
+      - notification
+    template: |
+      --- DESKTOP NOTIFICATION ---
+      Timestamp    : {timestamp_utc}
+      Desktop      : {desktop_name}
+      Notification : {notification}
+      ------------------------------
+
+  live_call:
+    label: "Live Call Requested"
+    fields:
+      - phone_number
+      - group_or_chat
+    template: |
+      --- LIVE CALL REQUEST ---
+      Timestamp    : {timestamp_utc}
+      Phone Number : {phone_number}
+      Requested In : {group_or_chat}
+      ---------------------------
