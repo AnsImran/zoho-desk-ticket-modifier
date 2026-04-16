@@ -15,7 +15,7 @@ services:
       - zoho-token-service_default
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8001/v1/readyz"]
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/v1/readyz').raise_for_status()"]
       interval: 30s
       timeout: 5s
       retries: 3
