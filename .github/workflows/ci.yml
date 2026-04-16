@@ -96,14 +96,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          cat > ~/.ssh/id_ed25519 <<'EOF'
-          ${{ secrets.DEPLOY_SSH_KEY }}
-          EOF
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
           PORT="${{ secrets.DEPLOY_PORT }}"
           if [ -z "$PORT" ]; then PORT="22"; fi
           ssh-keyscan -p "$PORT" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Pull and deploy
         shell: bash
