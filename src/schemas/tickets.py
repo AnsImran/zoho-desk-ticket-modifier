@@ -21,6 +21,28 @@ class UpdateFieldRequest(BaseModel):
     )
 
 
+class UpdateFieldsRequest(BaseModel):
+    """Request body for updating MULTIPLE fields on a Zoho Desk ticket in a
+    single PATCH. Bundles what would otherwise be N separate round-trips
+    into one request -- dramatically cheaper under Zoho's per-minute quota
+    and collapses the 4-parallel-PATCH pattern used by the notification
+    system into a single call."""
+
+    fields: dict[str, Any] = Field(
+        ...,
+        min_length=1,
+        description="Zoho Desk field name -> value map. Nested objects (e.g. `cf`) are forwarded as-is.",
+        examples=[
+            {
+                "status": "Assigned",
+                "productId": "1166045000001146278",
+                "subject": "Code Stroke Alert, Smith, John M.D.",
+                "cf": {"cf_worklist_based_ticket_type": "assigned"},
+            }
+        ],
+    )
+
+
 class PrivateCommentRequest(BaseModel):
     """Request body for adding a templated private comment to a ticket."""
 
