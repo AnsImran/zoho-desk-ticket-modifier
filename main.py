@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.core.config import settings
 from src.core.logging_config import setup_logging
@@ -114,3 +115,16 @@ app.include_router(v1)
 def health_compat() -> HealthResponse:
     """Backward-compatible alias for /v1/readyz."""
     return readiness()
+
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics (§38)
+# ---------------------------------------------------------------------------
+Instrumentator(
+    excluded_handlers=[
+        "/metrics",
+        ".*/health.*",
+        ".*/healthz",
+        ".*/readyz",
+    ],
+).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
